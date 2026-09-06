@@ -1,0 +1,6 @@
+{
+  "name": "Gemini Journal",
+  "description": "Your private AI thinking space. AI that thinks with you, while keeping your thoughts private.",
+  "requestFramePermissions": ["microphone"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

@@ -1,0 +1,143 @@
+{
+  "entities": {
+    "user": {
+      "title": "User",
+      "description": "User account document in Firestore",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "description": "Authenticated Firebase User UID" },
+        "email": { "type": "string", "description": "User email address" },
+        "createdAt": { "type": "number", "description": "Timestamp of account creation" }
+      },
+      "required": ["uid"]
+    },
+    "conversation": {
+      "title": "Conversation",
+      "description": "A private thinking session or journal record",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique conversation ID" },
+        "title": { "type": "string", "description": "Conversation or journal title" },
+        "summary": { "type": "string", "description": "AI-generated structured synthesis" },
+        "themes": { "type": "array", "description": "Extracted key themes" },
+        "goals": { "type": "array", "description": "Identified goals and action items" },
+        "openQuestions": { "type": "array", "description": "Open questions to revisit" },
+        "createdAt": { "type": "number", "description": "Creation timestamp in epoch ms" },
+        "updatedAt": { "type": "number", "description": "Last modified timestamp in epoch ms" },
+        "messageCount": { "type": "number", "description": "Number of messages in the session" }
+      },
+      "required": ["id", "title", "createdAt", "updatedAt"]
+    },
+    "message": {
+      "title": "Message",
+      "description": "An individual chat message in a conversation",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique message ID" },
+        "role": { "type": "string", "enum": ["user", "model", "assistant"], "description": "Sender role" },
+        "content": { "type": "string", "description": "Message textual content" },
+        "createdAt": { "type": "number", "description": "Timestamp when message was sent" }
+      },
+      "required": ["id", "role", "content", "createdAt"]
+    },
+    "insight": {
+      "title": "Insight",
+      "description": "An insight synthesized from the user's journal history",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique insight ID" },
+        "type": { "type": "string", "enum": ["recurring_theme", "goal_evolution", "open_question", "reflection"], "description": "Insight category" },
+        "title": { "type": "string", "description": "Insight title" },
+        "description": { "type": "string", "description": "Detailed explanation of observed pattern" },
+        "frequency": { "type": "number", "description": "Occurrence count" },
+        "relatedThemes": { "type": "array", "description": "Related thematic tags" },
+        "reflectionPrompt": { "type": "string", "description": "Reflective question for the user" },
+        "suggestedAction": { "type": "string", "description": "Recommended next step" },
+        "createdAt": { "type": "number", "description": "Timestamp created" }
+      },
+      "required": ["id", "type", "title", "description", "createdAt"]
+    },
+    "goal": {
+      "title": "Goal",
+      "description": "Goal and action milestones created by user or converted from thoughts",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique goal ID" },
+        "title": { "type": "string", "description": "Goal title" },
+        "description": { "type": "string", "description": "Goal context and description" },
+        "category": { "type": "string", "description": "Category like Career, Health, Project, Learning" },
+        "deadline": { "type": "string", "description": "Target completion date" },
+        "progress": { "type": "number", "description": "Percentage completed 0-100" },
+        "status": { "type": "string", "enum": ["Not Started", "In Progress", "Completed"], "description": "Current status" },
+        "tasks": { "type": "array", "description": "Milestone tasks checklist" },
+        "sourceJournalId": { "type": "string", "description": "Optional journal reference" },
+        "createdAt": { "type": "number", "description": "Timestamp created" },
+        "updatedAt": { "type": "number", "description": "Timestamp modified" }
+      },
+      "required": ["id", "title", "status", "progress", "createdAt", "updatedAt"]
+    },
+    "weeklyReflection": {
+      "title": "WeeklyReflection",
+      "description": "AI-synthesized weekly reflection review",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique weekly review ID" },
+        "weekLabel": { "type": "string", "description": "Week label e.g. Week of Sep 1, 2026" },
+        "focusAreas": { "type": "array", "description": "Core themes focused on" },
+        "accomplishments": { "type": "array", "description": "Key accomplishments and progress" },
+        "unfinishedItems": { "type": "array", "description": "Unfinished tasks and open challenges" },
+        "recurringThemes": { "type": "array", "description": "Themes recurring throughout the week" },
+        "openQuestions": { "type": "array", "description": "Key open questions for upcoming period" },
+        "goalsNeedingAttention": { "type": "array", "description": "Goals needing focus" },
+        "suggestedNextSteps": { "type": "array", "description": "Actionable next steps" },
+        "startNextWeekWith": { "type": "string", "description": "Focus mantra for next week" },
+        "createdAt": { "type": "number", "description": "Timestamp created" }
+      },
+      "required": ["id", "weekLabel", "createdAt"]
+    },
+    "userSettings": {
+      "title": "UserSettings",
+      "description": "User privacy preferences and AI memory settings",
+      "type": "object",
+      "properties": {
+        "rememberLongTermGoals": { "type": "boolean", "description": "Consent to remember goals across sessions" },
+        "useSummariesForReflection": { "type": "boolean", "description": "Consent to use summaries for reflection prompts" },
+        "generatePersonalInsights": { "type": "boolean", "description": "Consent to generate personal insights" },
+        "allowEmailReflection": { "type": "boolean", "description": "Consent to reflect on email data" },
+        "customMemories": { "type": "array", "description": "User-curated permanent memory notes" },
+        "updatedAt": { "type": "number", "description": "Timestamp updated" }
+      },
+      "required": ["rememberLongTermGoals", "useSummariesForReflection", "generatePersonalInsights"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "user",
+      "description": "User root document partition"
+    },
+    "/users/{userId}/conversations/{conversationId}": {
+      "schema": "conversation",
+      "description": "User private conversations and journal entries"
+    },
+    "/users/{userId}/conversations/{conversationId}/messages/{messageId}": {
+      "schema": "message",
+      "description": "Individual messages belonging to a user conversation"
+    },
+    "/users/{userId}/insights/{insightId}": {
+      "schema": "insight",
+      "description": "User personal insights and timeline items"
+    },
+    "/users/{userId}/goals/{goalId}": {
+      "schema": "goal",
+      "description": "User goals, milestones, and task checklists"
+    },
+    "/users/{userId}/reflections/{reflectionId}": {
+      "schema": "weeklyReflection",
+      "description": "User weekly reflections and review summaries"
+    },
+    "/users/{userId}/settings/{settingId}": {
+      "schema": "userSettings",
+      "description": "User privacy and AI memory configurations"
+    }
+  }
+}
