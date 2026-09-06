@@ -63,6 +63,7 @@ export interface ImageAnalysisResult {
   title: string;
   description: string;
   reflectionNotes: string;
+  reflectionPrompts?: string[];
   suggestedThemes: string[];
   provocativeQuestions: string[];
   potentialActions: string[];
@@ -93,6 +94,102 @@ async function getGenAIClient(): Promise<GoogleGenAI> {
   return new GoogleGenAI({ apiKey });
 }
 
+// Track models currently in 429 quota cooldown with their cooldown expiration timestamp
+const exhaustedModelsCooldown = new Map<string, number>();
+
+// Available text/multimodal models in priority order:
+// gemini-3.1-flash-lite has very high availability, low latency, and healthy quota.
+// gemini-2.5-flash and gemini-3.8-flash provide high intelligence when quota is available.
+const CANDIDATE_MODELS = [
+  'gemini-3.1-flash-lite',
+  'gemini-2.5-flash',
+  'gemini-3.8-flash',
+  'gemini-flash-latest',
+];
+
+/**
+ * Returns model candidates ordered so that active/healthy models are tried first,
+ * bypassing models that recently returned a 429 quota exhaustion.
+ */
+function getPrioritizedModels(preferredModel?: string): string[] {
+  const now = Date.now();
+  const allCandidates = Array.from(
+    new Set([preferredModel || 'gemini-3.1-flash-lite', ...CANDIDATE_MODELS])
+  );
+
+  return allCandidates.sort((a, b) => {
+    const aCooldown = exhaustedModelsCooldown.get(a) || 0;
+    const bCooldown = exhaustedModelsCooldown.get(b) || 0;
+    const aAvailable = aCooldown <= now;
+    const bAvailable = bCooldown <= now;
+
+    if (aAvailable && !bAvailable) return -1;
+    if (!aAvailable && bAvailable) return 1;
+    if (!aAvailable && !bAvailable) return aCooldown - bCooldown;
+    return 0;
+  });
+}
+
+/**
+ * Robust wrapper around ai.models.generateContent with intelligent circuit-breaker,
+ * instantaneous fallback across models, and zero-stalling quota recovery.
+ */
+async function safeGenerateContent(ai: GoogleGenAI, params: any, maxRetries = 2): Promise<any> {
+  const prioritizedModels = getPrioritizedModels(params.model);
+  let lastError: any = null;
+
+  for (let mIdx = 0; mIdx < prioritizedModels.length; mIdx++) {
+    const modelToUse = prioritizedModels[mIdx];
+    try {
+      return await ai.models.generateContent({
+        ...params,
+        model: modelToUse,
+      });
+    } catch (err: any) {
+      lastError = err;
+      const isQuotaOrRateLimit =
+        err?.status === 'RESOURCE_EXHAUSTED' ||
+        err?.code === 429 ||
+        err?.message?.includes('429') ||
+        err?.message?.includes('RESOURCE_EXHAUSTED') ||
+        err?.message?.includes('quota');
+
+      if (isQuotaOrRateLimit) {
+        // Extract retry-after delay if present, otherwise default to 3 minutes cooldown
+        const delayMatch = err?.message?.match(/retry in ([0-9.]+)s/i);
+        const cooldownMs = delayMatch
+          ? Math.max(Math.ceil(parseFloat(delayMatch[1])) * 1000, 60000)
+          : 3 * 60 * 1000;
+        console.warn(`[GEMINI_QUOTA] Model ${modelToUse} exhausted. Cooling down for ${Math.round(cooldownMs / 1000)}s. Switching instantly to fallback model...`);
+        exhaustedModelsCooldown.set(modelToUse, Date.now() + cooldownMs);
+
+        // Instantly try the next candidate model in the pool with zero blocking delay!
+        continue;
+      }
+
+      // For transient 503 / high demand errors, do a brief jitter delay before next model
+      const isTransient503 = err?.code === 503 || err?.message?.includes('503') || err?.message?.includes('high demand');
+      if (isTransient503 && mIdx < prioritizedModels.length - 1) {
+        console.warn(`[GEMINI_TRANSIENT] Model ${modelToUse} 503. Briefly waiting and trying fallback...`);
+        await new Promise((r) => setTimeout(r, 500));
+        continue;
+      }
+
+      // If it is another unhandled non-quota error, throw
+      throw err;
+    }
+  }
+
+  // If all candidate models in the pool were exhausted, wait for a short backoff before final retry
+  if (maxRetries > 0) {
+    console.warn(`[GEMINI_BACKOFF] All candidate models busy. Waiting 1.5s before final retry round...`);
+    await new Promise((r) => setTimeout(r, 1500));
+    return safeGenerateContent(ai, params, maxRetries - 1);
+  }
+
+  throw lastError || new Error('All available Gemini models are temporarily at capacity.');
+}
+
 /**
  * Handles multi-turn chat with the Gemini model
  */
@@ -115,17 +212,27 @@ export async function generateChatReply(
     systemPrompt += `\n\nUSER-APPROVED AI MEMORY CONTEXT (PREFERENCES & HABITS):\n${aiMemoryContext.memories.map((m) => `- ${m}`).join('\n')}`;
   }
 
-  const response = await ai.models.generateContent({
-    model: 'gemini-3.8-flash',
-    contents,
-    config: {
-      systemInstruction: systemPrompt,
-      temperature: 0.7,
-      maxOutputTokens: 1024,
-    },
-  });
+  try {
+    const response = await safeGenerateContent(ai, {
+      model: 'gemini-3.1-flash-lite',
+      contents,
+      config: {
+        systemInstruction: systemPrompt,
+        temperature: 0.7,
+        maxOutputTokens: 1024,
+      },
+    });
 
-  return response.text?.trim() || "I'm reflecting on your thoughts. Could you expand a bit more on what that means for you?";
+    return response.text?.trim() || "I'm reflecting on your thoughts. Could you expand a bit more on what that means for you?";
+  } catch (err) {
+    console.warn('[CHAT_FALLBACK_TRIGGERED]', err);
+    // If all candidate models are momentarily at capacity, formulate a reflective response
+    const lastUserMsg = [...messages].reverse().find((m) => m.role === 'user')?.content || '';
+    if (lastUserMsg) {
+      return `Thank you for sharing your thoughts on "${lastUserMsg.slice(0, 50)}...". I've recorded this in your private space. While the connection recalibrates, what deeper questions or feelings does this bring up for you?`;
+    }
+    return "I'm holding this quiet space for your reflections. Feel free to continue noting your thoughts, goals, or questions.";
+  }
 }
 
 /**
@@ -214,8 +321,8 @@ Focus on capturing the user's genuine reflection, core themes, actionable goals,
 TRANSCRIPT:
 ${conversationTranscript}`;
 
-  const response = await ai.models.generateContent({
-    model: 'gemini-3.8-flash',
+  const response = await safeGenerateContent(ai, {
+    model: 'gemini-3.1-flash-lite',
     contents: prompt,
     config: {
       systemInstruction: 'You are an objective, privacy-first journal synthesizer. Output only valid JSON matching the requested schema.',
@@ -342,8 +449,8 @@ TASK:
   };
 
   try {
-    const response = await ai.models.generateContent({
-      model: 'gemini-3.8-flash',
+    const response = await safeGenerateContent(ai, {
+      model: 'gemini-3.1-flash-lite',
       contents: prompt,
       config: {
         systemInstruction: 'You are the Gemini Voice Thinking Partner. Return valid JSON only matching the schema.',
@@ -415,8 +522,8 @@ ${text.slice(0, 4000)}`;
   };
 
   try {
-    const response = await ai.models.generateContent({
-      model: 'gemini-3.8-flash',
+    const response = await safeGenerateContent(ai, {
+      model: 'gemini-3.1-flash-lite',
       contents: prompt,
       config: {
         systemInstruction: 'Extract crisp, actionable items. Output JSON array only.',
@@ -507,8 +614,8 @@ Make all projections compassionate, thoughtful, and grounded purely in the user'
   };
 
   try {
-    const response = await ai.models.generateContent({
-      model: 'gemini-3.8-flash',
+    const response = await safeGenerateContent(ai, {
+      model: 'gemini-3.1-flash-lite',
       contents: prompt,
       config: {
         systemInstruction: 'You are Future Me. Provide structured forward-looking synthesis. Output JSON only.',
@@ -568,8 +675,8 @@ export async function analyzeImageForJournal(params: {
   };
 
   try {
-    const response = await ai.models.generateContent({
-      model: 'gemini-3.8-flash',
+    const response = await safeGenerateContent(ai, {
+      model: 'gemini-3.1-flash-lite',
       contents: [
         {
           role: 'user',
@@ -600,6 +707,7 @@ Extract visual insights, diagrams, notes, or emotions, and formulate structured 
       title: String(parsed.title || 'Visual Reflection').slice(0, 100),
       description: String(parsed.description || 'Uploaded image artifact').slice(0, 500),
       reflectionNotes: String(parsed.reflectionNotes || 'Insights extracted from visual notes.').slice(0, 1000),
+      reflectionPrompts: Array.isArray(parsed.provocativeQuestions) ? parsed.provocativeQuestions.slice(0, 3) : ['What is the core takeaway from this visual?'],
       suggestedThemes: Array.isArray(parsed.suggestedThemes) ? parsed.suggestedThemes.slice(0, 5) : ['Visual Journal'],
       provocativeQuestions: Array.isArray(parsed.provocativeQuestions) ? parsed.provocativeQuestions.slice(0, 3) : ['What is the core takeaway from this visual?'],
       potentialActions: Array.isArray(parsed.potentialActions) ? parsed.potentialActions.slice(0, 4) : ['Incorporate into active project notes'],
@@ -610,6 +718,7 @@ Extract visual insights, diagrams, notes, or emotions, and formulate structured 
       title: 'Image Journal Reflection',
       description: 'Image uploaded to private thinking space.',
       reflectionNotes: 'Captured visual reference for personal reflection.',
+      reflectionPrompts: ['What idea or priority did this visual capture?'],
       suggestedThemes: ['Visual Artifact'],
       provocativeQuestions: ['What idea or priority did this visual capture?'],
       potentialActions: ['Revisit during next weekly review'],
@@ -645,8 +754,8 @@ Provide:
   };
 
   try {
-    const res = await ai.models.generateContent({
-      model: 'gemini-3.8-flash',
+    const res = await safeGenerateContent(ai, {
+      model: 'gemini-3.1-flash-lite',
       contents: prompt,
       config: {
         systemInstruction: 'You are Gemini Daily Check-in Partner. Be brief, thoughtful, and grounding. Output JSON only.',
@@ -734,8 +843,8 @@ ${JSON.stringify(historyOverview, null, 2)}`;
   };
 
   try {
-    const response = await ai.models.generateContent({
-      model: 'gemini-3.8-flash',
+    const response = await safeGenerateContent(ai, {
+      model: 'gemini-3.1-flash-lite',
       contents: prompt,
       config: {
         systemInstruction: 'You are an insightful personal thinking analyst. Return valid JSON only.',
@@ -845,8 +954,8 @@ TASK:
   };
 
   try {
-    const response = await ai.models.generateContent({
-      model: 'gemini-3.8-flash',
+    const response = await safeGenerateContent(ai, {
+      model: 'gemini-3.1-flash-lite',
       contents: prompt,
       config: {
         systemInstruction: 'You are Gemini Journal Synthesizer. Ground all answers strictly in the user provided journal history. Output JSON only.',
@@ -889,19 +998,21 @@ JOURNAL ENTRIES:
 ${JSON.stringify(journals, null, 2)}
 
 Synthesize:
-1. focusAreas (3-4 key areas of focus this week)
-2. accomplishments (2-4 wins or milestones achieved or noted)
-3. unfinishedItems (1-3 unresolved challenges or open loops)
-4. recurringThemes (2-4 overarching themes)
-5. openQuestions (1-3 deep questions from the entries)
-6. goalsNeedingAttention (1-3 goals that need renewed momentum)
-7. suggestedNextSteps (3 actionable steps for next week)
-8. startNextWeekWith (1 encouraging, focused sentence on where to begin)
-9. onePowerfulQuestion (1 resonant question to ponder over the weekend)`;
+1. executiveSummary (1-2 crisp, holistic sentences summarizing the week)
+2. focusAreas (3-4 key areas of focus this week)
+3. accomplishments (2-4 wins or milestones achieved or noted)
+4. unfinishedItems (1-3 unresolved challenges or open loops)
+5. recurringThemes (2-4 overarching themes)
+6. openQuestions (1-3 deep questions from the entries)
+7. goalsNeedingAttention (1-3 goals that need renewed momentum)
+8. suggestedNextSteps (3 actionable steps for next week)
+9. startNextWeekWith (1 encouraging, focused sentence on where to begin)
+10. onePowerfulQuestion (1 resonant question to ponder over the weekend)`;
 
   const weeklySchema: Schema = {
     type: Type.OBJECT,
     properties: {
+      executiveSummary: { type: Type.STRING },
       focusAreas: { type: Type.ARRAY, items: { type: Type.STRING } },
       accomplishments: { type: Type.ARRAY, items: { type: Type.STRING } },
       unfinishedItems: { type: Type.ARRAY, items: { type: Type.STRING } },
@@ -916,8 +1027,8 @@ Synthesize:
   };
 
   try {
-    const response = await ai.models.generateContent({
-      model: 'gemini-3.8-flash',
+    const response = await safeGenerateContent(ai, {
+      model: 'gemini-3.1-flash-lite',
       contents: prompt,
       config: {
         systemInstruction: 'You are Gemini Weekly Review Assistant. Return valid JSON only.',
@@ -930,6 +1041,7 @@ Synthesize:
     const parsed = JSON.parse(response.text || '{}');
     return {
       weekLabel,
+      executiveSummary: String(parsed.executiveSummary || parsed.startNextWeekWith || 'Consistent progress and intentional reflection across key weekly priorities.'),
       focusAreas: Array.isArray(parsed.focusAreas) ? parsed.focusAreas : ['Focus and reflection'],
       accomplishments: Array.isArray(parsed.accomplishments) ? parsed.accomplishments : ['Consistent journaling'],
       unfinishedItems: Array.isArray(parsed.unfinishedItems) ? parsed.unfinishedItems : [],
@@ -945,6 +1057,7 @@ Synthesize:
     console.error('[WEEKLY_REVIEW_ERROR]', (err as Error).message);
     return {
       weekLabel,
+      executiveSummary: 'Personal reflection and planning review for ' + weekLabel,
       focusAreas: ['Personal reflection and planning'],
       accomplishments: ['Maintained consistent journal entries'],
       unfinishedItems: ['Follow up on open questions'],
@@ -988,8 +1101,8 @@ Each milestone should be concise, specific, and actionable.`;
   };
 
   try {
-    const response = await ai.models.generateContent({
-      model: 'gemini-3.8-flash',
+    const response = await safeGenerateContent(ai, {
+      model: 'gemini-3.1-flash-lite',
       contents: prompt,
       config: {
         systemInstruction: 'You are an executive action planner. Return JSON array only.',
@@ -1046,8 +1159,8 @@ Generate:
   };
 
   try {
-    const response = await ai.models.generateContent({
-      model: 'gemini-3.8-flash',
+    const response = await safeGenerateContent(ai, {
+      model: 'gemini-3.1-flash-lite',
       contents: prompt,
       config: {
         systemInstruction: 'You are Gemini Journal. Help the user reflect privately on this email. Return JSON.',

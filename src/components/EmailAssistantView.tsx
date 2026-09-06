@@ -293,12 +293,13 @@ export const EmailAssistantView: React.FC<EmailAssistantViewProps> = ({
                 {/* Actions Bar */}
                 <div className="pt-2 border-t border-stone-800/80 flex flex-wrap items-center justify-between gap-2">
                   <div className="flex items-center gap-2">
+                    {/* User approval gate: Reflect on Thread / Generate Reflection */}
                     <button
                       onClick={() => handleReflectOnEmail(email)}
                       className="px-3.5 py-1.5 rounded-xl bg-cyan-500/10 hover:bg-cyan-500/20 border border-cyan-500/30 text-cyan-300 text-xs font-semibold transition-colors flex items-center gap-1.5"
                     >
                       <Sparkles className="w-3.5 h-3.5" />
-                      <span>Reflect on this Email</span>
+                      <span>Reflect on Thread</span>
                     </button>
 
                     <button

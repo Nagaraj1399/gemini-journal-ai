@@ -92,15 +92,44 @@ export const CalendarAssistantView: React.FC<CalendarAssistantViewProps> = ({
 
           <div className="flex items-center gap-2 text-xs font-mono text-emerald-400 bg-stone-950/80 px-3 py-1.5 rounded-full border border-stone-800">
             <ShieldCheck className="w-4 h-4" />
-            <span>Private Schedule Integration</span>
+            <span>Scope: calendar.readonly (Strictly Read-Only)</span>
           </div>
+        </div>
+
+        {/* Security & Privacy Micro-Badge */}
+        <div className="mt-6 pt-4 border-t border-stone-800/80 flex flex-wrap items-center gap-4 text-xs font-mono text-stone-400">
+          <div className="flex items-center gap-1.5 text-emerald-400">
+            <ShieldCheck className="w-4 h-4" />
+            <span>Read-Only Calendar Access</span>
+          </div>
+          <span className="text-stone-600">•</span>
+          <span>Zero Background Modification</span>
+          <span className="text-stone-600">•</span>
+          <span>Requires User Confirmation for Action</span>
         </div>
       </div>
 
       {/* Schedule Items List */}
       <div className="space-y-4">
-        <div className="text-xs font-mono text-stone-500 uppercase tracking-wider px-1">
-          Today's Agenda & Focus Blocks
+        <div className="flex items-center justify-between px-1">
+          <div className="text-xs font-mono text-stone-500 uppercase tracking-wider">
+            Today's Agenda & Focus Blocks
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => onStartJournalWithPrompt('Reflect on Day: Reflect on today\'s agenda')}
+              className="px-3 py-1.5 rounded-xl bg-cyan-500/10 hover:bg-cyan-500/20 border border-cyan-500/30 text-cyan-300 text-xs font-semibold transition-colors flex items-center gap-1.5"
+            >
+              <Sparkles className="w-3.5 h-3.5" />
+              <span>Reflect on Day</span>
+            </button>
+            <button
+              onClick={() => alert('Focus block proposal requires your explicit confirmation before adding to schedule.')}
+              className="px-3 py-1.5 rounded-xl bg-stone-800 hover:bg-stone-700 text-stone-300 text-xs font-medium transition-colors"
+            >
+              Schedule Focus Block
+            </button>
+          </div>
         </div>
 
         <div className="grid grid-cols-1 gap-4">

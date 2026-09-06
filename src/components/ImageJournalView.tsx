@@ -15,7 +15,7 @@ import {
   ArrowRight,
 } from 'lucide-react';
 import { requestImageReflection } from '../services/api';
-import { createConversation, updateConversationSummary, saveSmartAction } from '../services/firestoreService';
+import { createConversation, updateConversationSummary, saveSmartAction, addMessage } from '../services/firestoreService';
 
 interface ImageJournalViewProps {
   userId: string;
@@ -120,34 +120,58 @@ export const ImageJournalView: React.FC<ImageJournalViewProps> = ({
 
     try {
       setIsSaving(true);
-      const convId = await createConversation(userId, editableTitle || analysisResult.title);
+      const journalTitle = (editableTitle || analysisResult.title || 'Multimodal Image Journal').trim();
+      const journalNotes = (editableNotes || analysisResult.reflectionNotes || '').trim();
+
+      const convId = await createConversation(userId, journalTitle);
+
+      // Add user message with image preview if available
+      await addMessage(userId, convId, {
+        role: 'user',
+        content: userPrompt.trim()
+          ? `[Multimodal Photo Upload] ${userPrompt.trim()}`
+          : `[Multimodal Photo Upload] Captured and reflected on image for "${journalTitle}"`,
+        imageUrl: previewUrl || undefined,
+      });
+
+      // Add model reflection response
+      await addMessage(userId, convId, {
+        role: 'model',
+        content: journalNotes,
+      });
 
       await updateConversationSummary(userId, convId, {
-        title: editableTitle || analysisResult.title,
-        summary: editableNotes || analysisResult.reflectionNotes,
-        themes: analysisResult.suggestedThemes,
-        goals: analysisResult.potentialActions,
-        openQuestions: analysisResult.provocativeQuestions,
+        title: journalTitle,
+        summary: journalNotes,
+        themes: analysisResult.suggestedThemes || [],
+        goals: analysisResult.potentialActions || [],
+        openQuestions: analysisResult.provocativeQuestions || [],
       });
 
       // Save any potential actions to Smart Actions
-      if (analysisResult.potentialActions.length > 0) {
+      if (Array.isArray(analysisResult.potentialActions) && analysisResult.potentialActions.length > 0) {
         for (const act of analysisResult.potentialActions.slice(0, 3)) {
-          await saveSmartAction(userId, {
-            title: act,
-            category: 'Personal',
-            urgency: 'medium',
-            status: 'pending',
-            sourceType: 'journal',
-            sourceId: convId,
-          });
+          if (act && act.trim()) {
+            try {
+              await saveSmartAction(userId, {
+                title: act.trim(),
+                category: 'Personal',
+                urgency: 'medium',
+                status: 'pending',
+                sourceType: 'journal',
+                sourceId: convId,
+              });
+            } catch (actionErr) {
+              console.warn('Could not auto-create smart action:', actionErr);
+            }
+          }
         }
       }
 
       setSavedJournalId(convId);
-    } catch (err) {
+    } catch (err: any) {
       console.error('Failed to save image journal:', err);
-      setErrorMsg('Failed to save to journal. Please try again.');
+      setErrorMsg(err?.message || 'Failed to save to journal. Please try again.');
     } finally {
       setIsSaving(false);
     }

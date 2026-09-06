@@ -146,7 +146,7 @@ export const ConversationView: React.FC<ConversationViewProps> = ({
       }
 
       // 2. Optimistically add user message to Firestore & UI
-      const userMsg = await addMessage(currentUser.uid, convId, 'user', text);
+      const userMsg = await addMessage(currentUser.uid, convId, { role: 'user', content: text });
       const updatedMessages = [...messages, userMsg];
       setMessages(updatedMessages);
 
@@ -165,7 +165,7 @@ export const ConversationView: React.FC<ConversationViewProps> = ({
       });
 
       // 5. Store Gemini reply in Firestore & update UI
-      const aiMsg = await addMessage(currentUser.uid, convId, 'model', replyContent);
+      const aiMsg = await addMessage(currentUser.uid, convId, { role: 'model', content: replyContent });
       setMessages((prev) => [...prev, aiMsg]);
     } catch (err: any) {
       console.error('[SEND_MSG_ERROR]', err);

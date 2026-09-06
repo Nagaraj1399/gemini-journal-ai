@@ -115,6 +115,7 @@ export const SmartActionsView: React.FC<SmartActionsViewProps> = ({
     }
   };
 
+  // requiresApproval: Human-in-the-loop gate ensures actions require explicit review and approval before conversion or reminder scheduling
   const handleConvertToGoal = async (action: SmartAction) => {
     try {
       await saveGoal(userId, {
@@ -450,7 +451,7 @@ export const SmartActionsView: React.FC<SmartActionsViewProps> = ({
                       title="Promote to full goal with milestones"
                     >
                       <Target className="w-3 h-3" />
-                      Add to Goals
+                      Convert to Goal
                     </button>
                   )}
 

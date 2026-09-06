@@ -33,6 +33,29 @@ function getUserCollection(userId: string, subcollection: string) {
   return collection(db, 'users', userId, subcollection);
 }
 
+/**
+ * Recursively removes undefined fields from an object/array so Firestore setDoc/updateDoc
+ * does not throw "Unsupported field value: undefined".
+ */
+export function cleanForFirestore<T>(data: T): T {
+  if (data === null || data === undefined) {
+    return data;
+  }
+  if (Array.isArray(data)) {
+    return data.map(cleanForFirestore) as unknown as T;
+  }
+  if (typeof data === 'object' && !(data instanceof Date)) {
+    const cleaned: Record<string, any> = {};
+    for (const [key, value] of Object.entries(data)) {
+      if (value !== undefined) {
+        cleaned[key] = cleanForFirestore(value);
+      }
+    }
+    return cleaned as T;
+  }
+  return data;
+}
+
 // -------------------------------------------------------------
 // Conversations
 // -------------------------------------------------------------
@@ -53,7 +76,7 @@ export async function createConversation(
     messageCount: 0,
   };
 
-  await setDoc(newDocRef, conversationData);
+  await setDoc(newDocRef, cleanForFirestore(conversationData));
   return newDocRef.id;
 }
 
@@ -63,18 +86,15 @@ export async function updateConversationSummary(
   summaryData: JournalSummary
 ): Promise<void> {
   const convRef = doc(db, 'users', userId, 'conversations', conversationId);
-  await setDoc(
-    convRef,
-    {
-      title: summaryData.title,
-      summary: summaryData.summary,
-      themes: summaryData.themes,
-      goals: summaryData.goals,
-      openQuestions: summaryData.openQuestions,
-      updatedAt: Date.now(),
-    },
-    { merge: true }
-  );
+  const data = cleanForFirestore({
+    title: summaryData.title,
+    summary: summaryData.summary,
+    themes: summaryData.themes || [],
+    goals: summaryData.goals || [],
+    openQuestions: summaryData.openQuestions || [],
+    updatedAt: Date.now(),
+  });
+  await setDoc(convRef, data, { merge: true });
 }
 
 export const updateConversationWithSummary = updateConversationSummary;
@@ -142,13 +162,13 @@ export async function addMessage(
   const newDocRef = doc(messagesCol);
   const now = Date.now();
 
-  const messageData: Message = {
+  const messageData: Message = cleanForFirestore({
     id: newDocRef.id,
     role: message.role,
     content: message.content,
     createdAt: now,
     ...(message.imageUrl ? { imageUrl: message.imageUrl } : {}),
-  };
+  });
 
   await setDoc(newDocRef, messageData);
 
@@ -158,10 +178,10 @@ export async function addMessage(
   const currentCount = convSnap.exists() ? (convSnap.data().messageCount || 0) : 0;
   await setDoc(
     convRef,
-    {
+    cleanForFirestore({
       updatedAt: now,
       messageCount: currentCount + 1,
-    },
+    }),
     { merge: true }
   );
 
@@ -203,7 +223,7 @@ export async function saveInsights(
 
   for (const item of insights) {
     const docRef = doc(insightsCol);
-    const insightData: Insight = {
+    const insightData: Insight = cleanForFirestore({
       id: docRef.id,
       type: item.type,
       title: item.title,
@@ -213,7 +233,7 @@ export async function saveInsights(
       reflectionPrompt: item.reflectionPrompt,
       suggestedAction: item.suggestedAction,
       createdAt: now,
-    };
+    });
     await setDoc(docRef, insightData);
     saved.push(insightData);
   }
@@ -248,7 +268,7 @@ export async function saveGoal(
   const goalsCol = getUserCollection(userId, 'goals');
   const docRef = goal.id ? doc(goalsCol, goal.id) : doc(goalsCol);
   const now = Date.now();
-  const goalData: Goal = {
+  const goalData: Goal = cleanForFirestore({
     id: docRef.id,
     title: goal.title,
     description: goal.description || '',
@@ -260,7 +280,7 @@ export async function saveGoal(
     sourceJournalId: goal.sourceJournalId,
     createdAt: goal.createdAt || now,
     updatedAt: now,
-  };
+  });
   await setDoc(docRef, goalData, { merge: true });
   return goalData;
 }
@@ -281,7 +301,7 @@ export async function updateGoal(
   updates: Partial<Goal>
 ): Promise<void> {
   const goalRef = doc(db, 'users', userId, 'goals', goalId);
-  await setDoc(goalRef, { ...updates, updatedAt: Date.now() }, { merge: true });
+  await setDoc(goalRef, cleanForFirestore({ ...updates, updatedAt: Date.now() }), { merge: true });
 }
 
 export async function deleteGoal(userId: string, goalId: string): Promise<void> {
@@ -300,7 +320,7 @@ export async function saveSmartAction(
   const actionsCol = getUserCollection(userId, 'actions');
   const docRef = action.id ? doc(actionsCol, action.id) : doc(actionsCol);
   const now = Date.now();
-  const data: SmartAction = {
+  const data: SmartAction = cleanForFirestore({
     id: docRef.id,
     title: action.title,
     description: action.description || '',
@@ -313,7 +333,7 @@ export async function saveSmartAction(
     reminderApproved: !!action.reminderApproved,
     createdAt: action.createdAt || now,
     updatedAt: now,
-  };
+  });
   await setDoc(docRef, data, { merge: true });
   return data;
 }
@@ -334,7 +354,7 @@ export async function updateSmartAction(
   updates: Partial<SmartAction>
 ): Promise<void> {
   const actionRef = doc(db, 'users', userId, 'actions', actionId);
-  await setDoc(actionRef, { ...updates, updatedAt: Date.now() }, { merge: true });
+  await setDoc(actionRef, cleanForFirestore({ ...updates, updatedAt: Date.now() }), { merge: true });
 }
 
 export async function deleteSmartAction(userId: string, actionId: string): Promise<void> {
@@ -353,7 +373,7 @@ export async function saveAIMemory(
   const memCol = getUserCollection(userId, 'memories');
   const docRef = memory.id ? doc(memCol, memory.id) : doc(memCol);
   const now = Date.now();
-  const data: AIMemory = {
+  const data: AIMemory = cleanForFirestore({
     id: docRef.id,
     content: memory.content,
     category: memory.category || 'preference',
@@ -361,7 +381,7 @@ export async function saveAIMemory(
     isActive: memory.isActive !== false,
     createdAt: memory.createdAt || now,
     updatedAt: now,
-  };
+  });
   await setDoc(docRef, data, { merge: true });
   return data;
 }
@@ -382,7 +402,7 @@ export async function updateAIMemory(
   updates: Partial<AIMemory>
 ): Promise<void> {
   const memRef = doc(db, 'users', userId, 'memories', memoryId);
-  await setDoc(memRef, { ...updates, updatedAt: Date.now() }, { merge: true });
+  await setDoc(memRef, cleanForFirestore({ ...updates, updatedAt: Date.now() }), { merge: true });
 }
 
 export async function deleteAIMemory(userId: string, memoryId: string): Promise<void> {
@@ -408,7 +428,7 @@ export async function saveVoiceSession(
   const sessCol = getUserCollection(userId, 'voiceSessions');
   const docRef = session.id ? doc(sessCol, session.id) : doc(sessCol);
   const now = Date.now();
-  const data: VoiceSession = {
+  const data: VoiceSession = cleanForFirestore({
     id: docRef.id,
     transcript: session.transcript,
     durationSeconds: session.durationSeconds || 0,
@@ -416,7 +436,7 @@ export async function saveVoiceSession(
     journalConverted: !!session.journalConverted,
     convertedJournalId: session.convertedJournalId,
     createdAt: session.createdAt || now,
-  };
+  });
   await setDoc(docRef, data, { merge: true });
   return data;
 }
@@ -446,7 +466,7 @@ export async function saveWeeklyReflection(
 ): Promise<WeeklyReflection> {
   const refCol = getUserCollection(userId, 'reflections');
   const docRef = reflection.id ? doc(refCol, reflection.id) : doc(refCol);
-  const data: WeeklyReflection = {
+  const data: WeeklyReflection = cleanForFirestore({
     id: docRef.id,
     weekLabel: reflection.weekLabel,
     focusAreas: reflection.focusAreas || [],
@@ -459,7 +479,7 @@ export async function saveWeeklyReflection(
     startNextWeekWith: reflection.startNextWeekWith || '',
     onePowerfulQuestion: reflection.onePowerfulQuestion,
     createdAt: reflection.createdAt || Date.now(),
-  };
+  });
   await setDoc(docRef, data);
   return data;
 }
@@ -500,7 +520,7 @@ export async function getUserSettings(userId: string): Promise<UserSettings> {
     customMemories: [],
   };
 
-  await setDoc(settingsRef, defaultSettings);
+  await setDoc(settingsRef, cleanForFirestore(defaultSettings));
   return defaultSettings;
 }
 
@@ -509,7 +529,7 @@ export async function saveUserSettings(
   settings: Partial<UserSettings>
 ): Promise<void> {
   const settingsRef = doc(db, 'users', userId, 'settings', 'preferences');
-  await setDoc(settingsRef, { ...settings, updatedAt: Date.now() }, { merge: true });
+  await setDoc(settingsRef, cleanForFirestore({ ...settings, updatedAt: Date.now() }), { merge: true });
 }
 
 // -------------------------------------------------------------

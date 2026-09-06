@@ -26,9 +26,13 @@ export async function getGeminiApiKey(): Promise<{ apiKey: string; status: Secre
   // Attempt Google Cloud Secret Manager first if credentials / environment permit
   try {
     const client = new SecretManagerServiceClient();
-    const [version] = await client.accessSecretVersion({
+    const accessPromise = client.accessSecretVersion({
       name: secretName,
     });
+    const timeoutPromise = new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error('Secret Manager lookup timeout')), 2500)
+    );
+    const [version] = await Promise.race([accessPromise, timeoutPromise]);
 
     const payload = version.payload?.data?.toString();
     if (payload && payload.trim().length > 0) {

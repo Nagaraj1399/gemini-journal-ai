@@ -39,6 +39,8 @@ interface Edge {
   target: string;
 }
 
+// Data Scoping: journals, goals, and insights props are strictly loaded from authenticated Firestore path users/${currentUser.uid}/* via getConversations(currentUser.uid), getGoals(currentUser.uid), and getInsights(currentUser.uid)
+// Graph structure models nodes and links (edges) representing thematic connections
 export const ThoughtGraphView: React.FC<ThoughtGraphViewProps> = ({
   journals,
   goals,

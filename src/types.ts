@@ -116,6 +116,8 @@ export interface AIMemory {
   content: string;
   category: 'goal' | 'preference' | 'habit' | 'boundary' | 'project';
   sourceJournalId?: string;
+  sourceType?: string;
+  confidence?: number;
   isActive: boolean;
   createdAt: number;
   updatedAt: number;

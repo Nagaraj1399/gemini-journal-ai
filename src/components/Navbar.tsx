@@ -86,7 +86,7 @@ export const Navbar: React.FC<NavbarProps> = ({
           </div>
 
           {/* Desktop Navigation */}
-          <nav className="hidden xl:flex items-center gap-1">
+          <nav className="hidden md:flex xl:flex items-center gap-1">
             {primaryNavItems.slice(0, 8).map((item) => {
               const isActive =
                 currentView === item.id ||

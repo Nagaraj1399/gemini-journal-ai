@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { motion, AnimatePresence } from 'motion/react';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { Navbar } from './components/Navbar';
 import { LandingPage } from './components/LandingPage';
@@ -132,6 +133,15 @@ const AppContent: React.FC = () => {
       />
 
       <main className="flex-1">
+        <AnimatePresence mode="wait">
+          <motion.div
+            key={currentView}
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.15 }}
+            className="w-full"
+          >
         {currentView === 'dashboard' && (
           <Dashboard
             onStartNewConversation={handleStartNewConversation}
@@ -268,6 +278,8 @@ const AppContent: React.FC = () => {
         {(currentView === 'settings' || currentView === 'security' || currentView === 'privacy') && (
           <SettingsPrivacyView />
         )}
+          </motion.div>
+        </AnimatePresence>
       </main>
 
       {/* Voice Mode Modal (Speech-to-Text Journaling) */}
